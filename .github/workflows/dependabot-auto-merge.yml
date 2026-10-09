@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# Reusable: Dependabot pull requests merge themselves once CI is green.
+#
+# Oracle rule (2026-09-18): every dependency at its latest version, no
+# pinning to old releases. The job approves the PR (the ruleset asks for one
+# review) and enables GitHub's auto-merge, so the merge happens only when
+# every required check has passed. A red check leaves the PR open for a
+# human. Needs "Allow auto-merge" in the calling repository's settings;
+# without it the merge step fails and nothing else happens.
+#
+# Least privilege (audit 2026-10-02, PRO-034): the caller grants write to
+# this one job only, and only the two scopes it needs.
+#
+# Call it from a repository with:
+#   on: pull_request
+#   permissions: read-all
+#   jobs:
+#     auto-merge:
+#       uses: numengames/.github/.github/workflows/dependabot-auto-merge.yml@<commit-sha>
+#       permissions:
+#         contents: write
+#         pull-requests: write
+name: Dependabot auto-merge
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ github.token }}"
+      - name: Approve
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Enable auto-merge (squash); merges when the required checks pass
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}

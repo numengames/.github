@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# Reusable: dependency audit (STD-015, beside SEC-003's Dependabot alerts).
+# The production dependencies of one lockfile, checked against the advisory
+# database, high severity and above. Development tooling is left out: it
+# never reaches the visitor. The lockfile is read, nothing is installed and
+# no package script runs.
+#
+# Seen, not enforced (ENG-067, STD-015 draft): advisories go to the log and
+# the job summary and the job stays green. Dependabot raises the fixes; this
+# shows what is still open.
+#
+# Call it from a repository with:
+#   jobs:
+#     audit:
+#       uses: numengames/.github/.github/workflows/audit.yml@<commit-sha>
+#       permissions:
+#         contents: read
+#       with:
+#         package-manager: npm          # or pnpm (run through corepack)
+#         working-directory: web        # where the lockfile is; default "."
+#         node-version-file: .nvmrc     # optional; default Node 22
+name: audit
+
+on:
+  workflow_call:
+    inputs:
+      package-manager:
+        description: "npm or pnpm"
+        type: string
+        default: npm
+      working-directory:
+        description: "Directory that holds the lockfile"
+        type: string
+        default: "."
+      node-version-file:
+        description: "Optional file with the Node version (e.g. .nvmrc); empty means Node 22"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: audit (production, high and above; reports, does not block)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ inputs.node-version-file == '' && '22' || '' }}
+          node-version-file: ${{ inputs.node-version-file }}
+
+      - name: audit
+        continue-on-error: true
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          MANAGER: ${{ inputs.package-manager }}
+          DIR: ${{ inputs.working-directory }}
+        run: |
+          set +e
+          case "$MANAGER" in
+            npm)  out="$(npm audit --omit=dev --audit-level=high 2>&1)"; status=$? ;;
+            pnpm) out="$(corepack pnpm audit --prod --audit-level high 2>&1)"; status=$? ;;
+            *)    echo "::error::package-manager must be npm or pnpm, got '$MANAGER'"; exit 2 ;;
+          esac
+          set -e
+          echo "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "$MANAGER audit ($DIR, production, high+): clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### $MANAGER audit ($DIR, production, high and above): seen, not enforced (STD-015 draft, ENG-067)"
+            echo
+            echo '```'
+            echo "$out" | tail -n 80
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::$MANAGER audit found high or critical advisories; see the job summary. Not blocking."
+          exit "$status"

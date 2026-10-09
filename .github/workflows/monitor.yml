@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# Reusable: the night watch. A probe of a LIVE site. On failure it opens (or
+# comments on) a `night-watch` issue in the calling repository, which GitHub
+# turns into push and email for the Oracle; on recovery it closes the issue
+# itself. The schedule lives in the caller.
+#
+# A failure seen only from Spain may be a Cloudflare range blocked during
+# football matches (status 000): check from another network before acting.
+#
+# Least privilege (SEC-008): no checkout; the caller grants `issues: write`
+# to this one job. Inputs reach the shell through environment variables,
+# never by template expansion inside the script.
+#
+# Call it from a repository with:
+#   on:
+#     schedule:
+#       - cron: "23 */6 * * *"
+#     workflow_dispatch:
+#   permissions: {}
+#   concurrency:
+#     group: night-watch
+#     cancel-in-progress: false
+#   jobs:
+#     probe:
+#       uses: numengames/.github/.github/workflows/monitor.yml@<commit-sha>
+#       permissions:
+#         issues: write
+#       with:
+#         site: numen.games
+#         follow-redirects: true
+#         checks: |
+#           / 200
+#           /en/ 200
+name: Night watch
+
+on:
+  workflow_call:
+    inputs:
+      site:
+        description: "Host to probe, without scheme (e.g. numinia.org)"
+        type: string
+        required: true
+      checks:
+        description: "One probe per line: '<path> <expected HTTP status>'"
+        type: string
+        required: true
+      follow-redirects:
+        description: "Follow redirects before comparing the status"
+        type: boolean
+        default: false
+      version-path:
+        description: "Optional path printed after the probes, e.g. /version.json"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Probe the live site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Probe
+        id: probe
+        env:
+          SITE: ${{ inputs.site }}
+          CHECKS: ${{ inputs.checks }}
+          FOLLOW: ${{ inputs.follow-redirects }}
+          VERSION_PATH: ${{ inputs.version-path }}
+        run: |
+          fails=""
+          flags="-s -o /dev/null -w %{http_code} --max-time 25"
+          [ "$FOLLOW" = "true" ] && flags="$flags -L"
+          while read -r path want; do
+            [ -z "$path" ] && continue
+            # shellcheck disable=SC2086
+            code=$(curl $flags "https://$SITE$path" || echo 000)
+            echo "GET $path -> $code (want $want)"
+            [ "$code" = "$want" ] || fails="$fails $path→$code(want:$want)"
+          done <<< "$CHECKS"
+          if [ -n "$VERSION_PATH" ]; then
+            echo "live version: $(curl -s --max-time 20 "https://$SITE$VERSION_PATH" || echo unreachable)"
+          fi
+          if [ -n "$fails" ]; then
+            echo "fails=$fails" >> "$GITHUB_OUTPUT"
+            echo "::error::Probes failing:$fails"
+            exit 1
+          fi
+      - name: Raise the alarm
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILS: ${{ steps.probe.outputs.fails }}
+          SITE: ${{ inputs.site }}
+        run: |
+          gh label create night-watch --repo "$GITHUB_REPOSITORY" --color D33440 \
+            --description "Live-site alarm raised by the monitor" 2>/dev/null || true
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --label night-watch --state open --json number --jq '.[0].number // empty')
+          body="Probes failing: \`$FAILS\` · $(date -u +%FT%TZ) · [run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "Still failing. $body"
+          else
+            full=$(printf 'The night watch found %s failing. %s\n\nDiagnosis: verify from outside Spain-on-match-day networks first (Cloudflare ranges are blocked there during football matches).' "$SITE" "$body")
+            gh issue create --repo "$GITHUB_REPOSITORY" --label night-watch \
+              --title "$SITE is failing its probes" --body "$full"
+          fi
+      - name: Stand down on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE: ${{ inputs.site }}
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --label night-watch --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue close "$open" --repo "$GITHUB_REPOSITORY" \
+              --comment "$SITE answers again: probes green at $(date -u +%FT%TZ). Standing down."
+          fi

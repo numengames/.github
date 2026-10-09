@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# Reusable: workflow lint (STD-015 SEC-007/SEC-008). The workflows that guard
+# a repository are code too. actionlint checks their syntax, expressions and
+# shell; zizmor checks their security (unpinned actions, persisted
+# credentials, template injection, excessive permissions).
+#
+# Seen, not enforced (ENG-067, STD-015 draft): every finding goes to the log
+# and the job summary, and the job stays green. Fix a finding in the
+# workflow it names. Both tools are pinned: actionlint is the release binary
+# checked against its published checksums, zizmor an exact PyPI version.
+#
+# Call it from a repository with:
+#   on:
+#     pull_request:
+#       paths: [".github/workflows/**"]
+#     push:
+#       branches: [main]
+#       paths: [".github/workflows/**"]
+#   jobs:
+#     lint:
+#       uses: numengames/.github/.github/workflows/workflow-lint.yml@<commit-sha>
+#       permissions:
+#         contents: read
+name: workflow-lint
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ZIZMOR_VERSION: 1.30.1
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: install actionlint (checksum verified)
+        run: |
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$tarball" "$base/$tarball"
+          curl -sSfL -o checksums.txt "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep " $tarball\$" checksums.txt | sha256sum -c -
+          tar xzf "$tarball" actionlint
+          ./actionlint -version
+
+      - name: actionlint (reports, does not block)
+        continue-on-error: true
+        run: |
+          set +e
+          out="$(./actionlint -no-color 2>&1)"; status=$?
+          set -e
+          echo "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "actionlint: clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### actionlint: findings, seen not enforced (STD-015 draft, ENG-067)"
+            echo
+            echo '```'
+            echo "$out" | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::actionlint found issues; see the job summary. Not blocking."
+          exit "$status"
+
+      - name: install zizmor
+        run: pipx install "zizmor==${ZIZMOR_VERSION}"
+
+      - name: zizmor (reports, does not block)
+        continue-on-error: true
+        run: |
+          set +e
+          out="$(zizmor --format plain .github/workflows 2>&1)"; status=$?
+          set -e
+          echo "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "zizmor: clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### zizmor: findings, seen not enforced (STD-015 draft, ENG-067)"
+            echo
+            echo '```'
+            echo "$out" | tail -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::zizmor found issues; see the job summary. Not blocking."
+          exit "$status"
