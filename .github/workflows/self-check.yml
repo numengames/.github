@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# This repository's own CI: it runs its shared workflows on itself, so a
+# change here is exercised before any other repository pins it.
+name: self-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    uses: ./.github/workflows/secrets.yml
+    permissions:
+      contents: read
+  workflow-lint:
+    uses: ./.github/workflows/workflow-lint.yml
+    permissions:
+      contents: read
