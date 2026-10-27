@@ -7,7 +7,9 @@
 # pinning to old releases. The job approves the PR (the ruleset asks for one
 # review) and enables GitHub's auto-merge, so the merge happens only when
 # every required check has passed. A red check leaves the PR open for a
-# human. Needs "Allow auto-merge" in the calling repository's settings;
+# human. Only patch and minor updates are merged this way; major updates
+# (version-update:semver-major) stay open, unapproved, for the Oracle.
+# Needs "Allow auto-merge" in the calling repository's settings;
 # without it the merge step fails and nothing else happens.
 #
 # Least privilege (audit 2026-10-02, PRO-034): the caller grants write to
@@ -44,11 +46,13 @@ jobs:
         with:
           github-token: "${{ github.token }}"
       - name: Approve
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ github.token }}
       - name: Enable auto-merge (squash); merges when the required checks pass
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
