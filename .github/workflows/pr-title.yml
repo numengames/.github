@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2026 Numen Games S.L.
+# SPDX-License-Identifier: MIT
+#
+# Reusable: the pull request title check (Conventional Commits 1.0.0).
+# Every repository of the house squash-merges, so the title of a pull request
+# becomes the subject of the commit on the default branch. The title therefore
+# reads `type(scope): subject`: the type says the kind of change, the optional
+# scope the area (`docs(missions)`, `docs(standards)`, `feat(web)`), a `!`
+# before the colon marks a breaking change.
+#
+#   types: feat fix docs style refactor perf test build ci chore revert
+#   also accepted: GitHub's own revert title, Revert "<original title>"
+#
+# No third-party action: the title is read from the event into an environment
+# variable and matched with grep, so nothing in it can run as code. A failing
+# title is fixed by editing it on the pull request; the check runs again.
+#
+# Call it from a repository with:
+#   on:
+#     pull_request:
+#       types: [opened, edited, synchronize, reopened]
+#   permissions:
+#     contents: read
+#   jobs:
+#     title:
+#       uses: numengames/.github/.github/workflows/pr-title.yml@<commit-sha>
+#       permissions:
+#         contents: read
+name: pr-title
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: the title is a Conventional Commits title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+          conventional="^(${types})(\\([^() ]+\\))?!?: [^ ].*\$"
+          revert='^Revert (“|").+(”|")$'
+          if printf '%s\n' "$TITLE" | grep -Eq "$conventional"; then
+            echo "ok: $TITLE"
+          elif printf '%s\n' "$TITLE" | grep -Eq "$revert"; then
+            echo "ok (GitHub revert title): $TITLE"
+          else
+            {
+              echo "::error title=Pull request title::\"$TITLE\" is not a Conventional Commits title."
+              echo "Write it as: type(scope): subject"
+              echo "  types: ${types//|/ }"
+              echo "  examples: docs(missions): open MIS-300 | docs(standards): STD-019 3.3.0 | feat(web): the agents page | fix(machine): ..."
+              echo "Edit the title on the pull request; this check runs again."
+            } >&2
+            exit 1
+          fi
