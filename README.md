@@ -17,6 +17,7 @@ The one home of what every Numen Games repository shares on GitHub. **Change it 
 | `.github/workflows/audit.yml` | Production dependency audit, npm or pnpm | Called, with the lockfile's directory |
 | `.github/workflows/monitor.yml` | The night watch of a live site | Called on a schedule, with the site and its probes |
 | `.github/workflows/dependabot-auto-merge.yml` | Dependabot PRs merge themselves when CI is green | Called on `pull_request` |
+| `.github/workflows/pr-title.yml` | The pull request title is a Conventional Commits title (`type(scope): subject`, or GitHub's `Revert "…"`) | Called on `pull_request`, including `edited` |
 
 Each file says, at its top, exactly how to call it. A repository keeps a workflow of its own only when the job belongs to it: its build, its deploy.
 

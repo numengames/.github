@@ -7,6 +7,7 @@ name: self-check
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
     branches: [main]
 
@@ -20,5 +21,10 @@ jobs:
       contents: read
   workflow-lint:
     uses: ./.github/workflows/workflow-lint.yml
+    permissions:
+      contents: read
+  pr-title:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/pr-title.yml
     permissions:
       contents: read
